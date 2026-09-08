@@ -157,6 +157,13 @@ Each `(connection, profile)` pair gets its own backend and socket, pooled
 with the same idle-reaping as local per-profile backends — background agents
 keep streaming while you look at another gateway.
 
+Approval buttons route back to the session's owning backend, not whichever
+profile is currently selected. For a local secondary profile, Desktop can use
+the socket that delivered the request even when the cached session binding is
+missing. Saved session ownership still takes precedence, and deleting or
+renaming that local profile clears this temporary route rather than reconnecting
+an obsolete backend.
+
 ### Switching and scoping
 
 The sidebar foot follows one hierarchy: **gateway → profile → sessions**.
@@ -170,10 +177,31 @@ that live on one gateway.
   avatars remain a separate control after the divider. The same selector scales
   from two gateways to a larger fleet without turning backends into profile-like
   glyphs or crowding profile actions out of the rail.
-- Selecting a gateway restores the last profile used there. The profile rail
-  then shows only that gateway's profiles; the home pill returns to its default
-  profile and the layers pill shows **All profiles on this gateway**.
-  **Cmd/Ctrl+1–9** continue to switch profiles within the active gateway.
+- Selecting a gateway restores the last profile used there. The home pill
+  returns to its default profile and the layers pill shows **All profiles on
+  this gateway**. **Cmd/Ctrl+1–9** continue to switch profiles within the
+  active gateway.
+- With several gateways the profile rail is a **fleet rail**: every registered
+  gateway's profiles sit on the one strip, each group headed by that gateway's
+  kind glyph (device, network, terminal, cloud) — the same glyph the gateway
+  selector uses. The active gateway's squares look exactly as they do on a
+  single-gateway Desktop; the other gateways' squares are dimmed ("at rest").
+  Hovering an at-rest square names its machine (`omer · This device`), so two
+  same-named profiles on different machines never read alike.
+- Clicking an at-rest square performs the same switch as the gateway selector,
+  landing on that exact `(gateway, profile)`: the square spins while the
+  target is dialed, the previous gateway stays painted until the target
+  answers, and a dead target fails the click with a message rather than
+  leaving the window half-switched. Groups keep registry order whichever
+  gateway is active, so a square never moves under the pointer that clicked
+  it. Right-click on an at-rest square offers **Switch to**, **Color**,
+  **Rename**, **Edit SOUL.md** and **Delete**, all executed on the square's
+  own gateway; the delete confirmation names the machine.
+- A gateway the last enumeration could not reach keeps its squares, marked
+  with an amber dot on its glyph — a sleeping box is still yours. Two
+  registrations of one backend collapse to a single group. Past thirteen
+  squares across the fleet, the strip condenses into one menu sectioned by
+  gateway.
 - The selected gateway survives a quit and relaunch only when **Settings →
   Gateways → At startup, return to Sessions on the last-used gateway** is on.
   The preference and gateway id live in the app's user-data registry, so
@@ -211,10 +239,11 @@ home, not a second add flow.
 
 Sessions intentionally show one active gateway at a time: this keeps files,
 tools, channels, cron, and session history in one understandable execution
-context. Bot Mode serves a different job and may present the union roster,
-grouped by gateway, so a user can open one agent on a NAS and another on a VPS
-from one surface. Opening a bot still activates its exact `(gateway, profile)`
-route.
+context. The fleet profile rail widens only the *picker* — the workspace still
+lives on exactly one `(gateway, profile)` after every click. Bot Mode serves a
+different job and may present the union roster, grouped by gateway, so a user
+can open one agent on a NAS and another on a VPS from one surface. Opening a
+bot still activates its exact `(gateway, profile)` route.
 
 Direct bot mentions and delegation remain gateway-local by default. Crossing a
 backend boundary changes filesystem, credentials, tools, and trust context, so

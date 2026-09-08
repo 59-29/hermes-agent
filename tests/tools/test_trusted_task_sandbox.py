@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 
 def test_task_override_selects_isolated_backend(monkeypatch):
-    from tools import terminal_tool
+    from tools import terminal_tool, terminal_tool_backends
 
     created = {}
     monkeypatch.setattr(terminal_tool, "_get_env_config", lambda: {
@@ -13,7 +13,7 @@ def test_task_override_selects_isolated_backend(monkeypatch):
         created.update(kwargs)
         return SimpleNamespace()
 
-    monkeypatch.setattr(terminal_tool, "_create_environment", create)
+    monkeypatch.setattr(terminal_tool_backends, "_create_environment", create)
     monkeypatch.setattr(terminal_tool, "_start_cleanup_thread", lambda: None)
     terminal_tool.register_task_env_overrides("cron-session", {
         "env_type": "docker",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tools import mcp_tool_handlers as mcp_handlers
+
 import asyncio
 import json
 from types import SimpleNamespace
@@ -9,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.conversation_loop import _restore_or_build_system_prompt
-from hermes_cli import lifecycle, plugins
+from hermes_cli import lifecycle, plugins, plugins_authority
 from hermes_cli.plugins import PluginContext, PluginManifest
 
 
@@ -54,8 +56,8 @@ def _mcp_server(monkeypatch, mcp_tool, session):
                              _pending_call_context=None,
                              _mark_session_proven=lambda: None,
                              mark_tool_call=lambda: None)
-    monkeypatch.setattr(mcp_tool, "_get_connected_server_for_call", lambda _name: server)
-    monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop",
+    monkeypatch.setattr("tools.mcp_tool_discovery._get_connected_server_for_call", lambda _name: server)
+    monkeypatch.setattr("tools.mcp_tool_loop._run_on_mcp_loop",
                         lambda factory, timeout: asyncio.run(factory()))
     return server
 
@@ -141,7 +143,7 @@ def test_required_metadata_failure_prevents_mcp_rpc(monkeypatch, mode):
     _lease(manager)
     _mcp_server(monkeypatch, mcp_tool, Session())
 
-    result = mcp_tool._make_tool_handler("fleet", "claim", 5)(
+    result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
         {}, session_id="cron-session", task_id="run-1")
 
     assert "Trusted MCP metadata failed" in json.loads(result)["error"]
@@ -168,11 +170,11 @@ def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
 
     _mcp_server(monkeypatch, mcp_tool, Session())
 
-    result = mcp_tool._make_tool_handler("fleet", "claim", 5)(
+    result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
         {}, session_id="cron-session", task_id="run-1")
 
     assert "Trusted MCP result policy failed" in json.loads(result)["error"]
-    assert mcp_tool.consume_mcp_runtime_stop() == {
+    assert mcp_handlers.consume_mcp_runtime_stop() == {
         "reason": "policy_error", "status": "failure", "policy": "required",
         "run_id": "run-1",
     }
@@ -219,15 +221,15 @@ def test_authority_survives_session_rotation(monkeypatch):
     _mcp_server(monkeypatch, mcp_tool, Session())
 
     # The run rotated onto a compression continuation: same fire, new session id.
-    plugins.bind_authoritative_run_session("run-1", "cron-session-child")
-    mcp_tool._make_tool_handler("fleet", "claim", 5)(
+    plugins_authority.bind_authoritative_run_session("run-1", "cron-session-child")
+    mcp_handlers._make_tool_handler("fleet", "claim", 5)(
         {}, session_id="cron-session-child", task_id="run-1")
 
     assert metadata_calls[0]["session_id"] == "cron-session-child"
     assert metadata_calls[0]["root_session_id"] == "cron-session"
     assert sent_meta == {"run": "run-1"}
     assert result_calls and result_calls[0]["session_id"] == "cron-session-child"
-    assert mcp_tool.consume_mcp_runtime_stop() == {
+    assert mcp_handlers.consume_mcp_runtime_stop() == {
         "reason": "max_items", "status": "success", "policy": "required",
         "run_id": "run-1",
     }
@@ -236,7 +238,11 @@ def test_authority_survives_session_rotation(monkeypatch):
     receipts = lifecycle.finalize_session(
         session_id="cron-session-child", platform="cron",
     )
-    assert receipts[0] == {"status": "finalized"}
+    # The receipt binds the rotated session; the fire's run id stays authoritative.
+    assert receipts[0] == {
+        "status": "finalized", "policy": "required", "run_id": "run-1",
+        "session_id": "cron-session-child", "root_session_id": "cron-session",
+    }
     assert manager._authoritative_runs == {}
     assert manager._authoritative_run_by_session == {}
 
@@ -254,10 +260,10 @@ def test_authority_resolves_by_rotated_session_without_run_id(monkeypatch):
 
     manager = _manager(monkeypatch)
     _lease(manager)
-    plugins.bind_authoritative_run_session("run-1", "cron-session-child")
+    plugins_authority.bind_authoritative_run_session("run-1", "cron-session-child")
     _mcp_server(monkeypatch, mcp_tool, Session())
 
-    result = mcp_tool._make_tool_handler("fleet", "claim", 5)(
+    result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
         {}, session_id="cron-session-child", task_id="")
 
     assert "Trusted MCP metadata failed" in json.loads(result)["error"]
@@ -285,7 +291,7 @@ def test_plugin_unload_leaves_an_in_flight_run_fail_closed(monkeypatch):
     assert "run-1" in manager._authoritative_runs
 
     _mcp_server(monkeypatch, mcp_tool, Session())
-    result = mcp_tool._make_tool_handler("fleet", "claim", 5)(
+    result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
         {}, session_id="cron-session", task_id="run-1")
 
     assert "Trusted MCP metadata failed" in json.loads(result)["error"]
