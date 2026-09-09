@@ -20,6 +20,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from agent.runtime_policy import is_authoritative
+
 from agent.display import (
     KawaiiSpinner,
     build_tool_preview as _build_tool_preview,
@@ -1736,7 +1738,7 @@ def execute_tool_calls_segmented(agent, assistant_message, messages: list, effec
         _active_env = get_active_env(effective_task_id)
         _exec_cwd = Path(_active_env.cwd) if _active_env is not None and _active_env.cwd else None
         segments = _plan_tool_batch_segments(assistant_message.tool_calls, execution_cwd=_exec_cwd,
-                                            mcp_barrier=bool(getattr(agent, "runtime_policy", None)))
+                                            mcp_barrier=is_authoritative(getattr(agent, "runtime_policy", None)))
 
     for segment_index, (kind, calls) in enumerate(segments):
         if getattr(agent, "_incremental_persistence_failed", False):

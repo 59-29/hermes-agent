@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, List
 
+from agent.runtime_policy import is_authoritative
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +55,7 @@ def finalize_session(**kwargs: Any) -> List[Any]:
     receipt = None
     settlement_error = None
     resolved = authority.resolve_authoritative_run(run_id=run_id, session_id=session_id) if (run_id or session_id) else None
-    if required_policy and (
+    if is_authoritative(required_policy) and (
         not resolved or authority.authoritative_run_policy(resolved) != required_policy
     ):
         settlement_error = RuntimeError("required authoritative run lease is absent or mismatched")

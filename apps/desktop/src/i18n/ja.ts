@@ -299,6 +299,13 @@ export const ja = defineLocale({
   },
 
   settings: {
+    plugins: {
+      installModal: {
+        installFromGit: 'Git からインストール',
+        reviewRepository: 'リポジトリを確認',
+        repoPlaceholder: 'https://github.com/owner/repo'
+      }
+    },
     closeSettings: '設定を閉じる',
     exportConfig: '設定を書き出す',
     importConfig: '設定を読み込む',
@@ -2038,13 +2045,23 @@ export const ja = defineLocale({
   },
 
   sidebar: {
+    gatewayGroups: {
+      grouping: 'ゲートウェイとプロファイル',
+      rename: 'グループ名を変更',
+      aliasLabel: '表示名',
+      aliasHint: '表示名のみ変更します。ゲートウェイ名とプロファイル名は変わりません。',
+      resetName: '名前をリセット',
+      moveUp: '上に移動',
+      moveDown: '下に移動',
+      reorder: 'グループを並べ替え',
+      actions: 'グループの操作'
+    },
     nav: {
       'new-session': '新しいセッション',
       skills: 'スキルとツール',
       messaging: 'メッセージング',
       artifacts: 'アーティファクト',
-      cron: 'スケジュール済みジョブ',
-      'session-import': 'セッションを取り込む'
+      cron: 'スケジュール済みジョブ'
     },
     searchAria: 'セッションを検索',
     searchPlaceholder: 'セッションを検索…',

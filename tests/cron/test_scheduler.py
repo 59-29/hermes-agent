@@ -760,7 +760,8 @@ class TestRunJobSessionPersistence:
         assert finalize.call_args.kwargs["terminal_outcome"] == outcome
         assert finalize.call_args.kwargs["completed"] is True
 
-    def test_required_policy_finalizer_failure_fails_the_run(self, tmp_path):
+    @pytest.mark.parametrize("policy", [None, "observer", "fleet-runtime"])
+    def test_required_policy_finalizer_failure_fails_the_run(self, tmp_path, policy):
         """A failed settlement fails the RUN; it must not make cleanup optional.
 
         The settlement raise used to leave run_job's finally before the
@@ -779,11 +780,12 @@ class TestRunJobSessionPersistence:
             extra=(patch("hermes_cli.lifecycle.finalize_session",
                          side_effect=RuntimeError("no settlement receipt")),),
         ) as (fake_db, mock_agent_cls):
-            with pytest.raises(RuntimeError, match="no settlement receipt"):
-                run_job({
-                    "id": "bounded", "name": "bounded", "prompt": "work",
-                    "runtime_policy": "fleet-runtime",
-                })
+            job = {"id": "bounded", "name": "bounded", "prompt": "work", "runtime_policy": policy}
+            if policy == "fleet-runtime":
+                with pytest.raises(RuntimeError, match="no settlement receipt"):
+                    run_job(job)
+            else:
+                assert run_job(job)[0] is True
 
             assert fake_db.end_session.called, "session store was not ended"
             assert fake_db.close.called, "session store was not closed"

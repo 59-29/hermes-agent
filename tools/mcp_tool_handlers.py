@@ -533,10 +533,15 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                             raise RuntimeError("authoritative result callback returned no decision")
                         continue
                     if decision.get("action") == "stop":
-                        reason = str(decision.get("reason") or "mcp_result")
-                        status = str(decision.get("status") or "success")
-                        if _run_id and status not in {"success", "failure"}:
-                            raise RuntimeError("authoritative stop status is invalid")
+                        reason = decision.get("reason")
+                        status = decision.get("status")
+                        if _run_id:
+                            if not isinstance(reason, str) or not reason.strip():
+                                raise RuntimeError("authoritative stop reason is invalid")
+                            if not isinstance(status, str) or status not in {"success", "failure"}:
+                                raise RuntimeError("authoritative stop status is invalid")
+                        else:
+                            reason = str(reason or "mcp_result")
                         directive = {"reason": reason}
                         if _run_id:
                             directive.update(

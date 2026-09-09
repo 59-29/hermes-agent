@@ -399,12 +399,14 @@ must register all four callbacks with
 - `on_session_start` returns `{"action": "allow"}`;
 - `mcp_request_metadata` returns `{"meta": {...}}` before the RPC;
 - `mcp_tool_result` returns `{"action": "continue"}` or a typed stop with
-  `reason` and `status` (`success` or `failure`);
+  an explicit non-blank string `reason` and `status` (`success` or `failure`);
 - `on_session_finalize` durably settles the run and returns
   `{"status": "finalized"}`.
 
 Missing, raising, or malformed required callbacks fail closed. Jobs without
-`runtime_policy` retain the ordinary observer-hook behavior.
+`runtime_policy`, or with `runtime_policy: observer`, retain the ordinary
+observer-hook behavior. Observer runs require no authority lease or settlement
+receipt and do not acquire authority-specific MCP barriers or delegation limits.
 
 Every required callback receives the run's identity: `run_id` (the run's
 immutable fire id), `session_id` (the transcript session the run is on right

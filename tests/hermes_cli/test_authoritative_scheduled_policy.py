@@ -150,7 +150,19 @@ def test_required_metadata_failure_prevents_mcp_rpc(monkeypatch, mode):
     assert called is False
 
 
-@pytest.mark.parametrize("mode", ["absent", "raising"])
+@pytest.mark.parametrize("mode", [
+    "absent", "raising",
+    {"action": "stop"},
+    {"action": "stop", "status": "success"},
+    {"action": "stop", "reason": "max_items"},
+    {"action": "stop", "reason": "", "status": "success"},
+    {"action": "stop", "reason": "   ", "status": "success"},
+    {"action": "stop", "reason": 42, "status": "success"},
+    {"action": "stop", "reason": "max_items", "status": None},
+    {"action": "stop", "reason": "max_items", "status": ""},
+    {"action": "stop", "reason": "max_items", "status": "partial"},
+    {"action": "stop", "reason": "max_items", "status": ["success"]},
+])
 def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
     import tools.mcp_tool as mcp_tool
 
@@ -160,6 +172,8 @@ def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
     callbacks = {"mcp_request_metadata": lambda **_kwargs: {"meta": {}}}
     if mode == "raising":
         callbacks["mcp_tool_result"] = broken
+    elif isinstance(mode, dict):
+        callbacks["mcp_tool_result"] = lambda **_kwargs: mode
     manager = _manager(monkeypatch, callbacks)
     _lease(manager)
 
@@ -178,6 +192,49 @@ def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
         "reason": "policy_error", "status": "failure", "policy": "required",
         "run_id": "run-1",
     }
+
+
+def test_observer_policy_stays_non_authoritative_across_lifecycle(monkeypatch):
+    import tools.mcp_tool as mcp_tool
+    from agent.runtime_policy import apply_mcp_runtime_stop
+    from cron.jobs import _normalize_runtime_policy
+    from cron.scheduler_settlement import classify_completion, settle_run
+    from tools import delegate_tool
+
+    manager = _manager(monkeypatch)
+    agent = _agent()
+    agent.runtime_policy = _normalize_runtime_policy("observer")
+    seen = []
+
+    def observe(hook, **_kwargs):
+        seen.append(hook)
+        return []
+
+    monkeypatch.setattr(plugins, "invoke_hook", observe)
+    monkeypatch.setattr("agent.credits_tracker.seed_credits_at_session_start", lambda _agent: None)
+    _restore_or_build_system_prompt(agent, None, [])
+    assert manager._authoritative_runs == {}
+
+    class Session:
+        async def call_tool(self, _name, **kwargs):
+            assert not kwargs.get("meta")
+            return SimpleNamespace(content=[SimpleNamespace(text="done")], isError=False, meta={})
+
+    _mcp_server(monkeypatch, mcp_tool, Session())
+    result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
+        {}, session_id=agent.session_id, task_id=agent.runtime_task_id)
+    assert json.loads(result) == {"result": "done"}
+    mcp_handlers._mcp_runtime_stop.set({"status": "success"})
+    apply_mcp_runtime_stop(agent)
+    assert getattr(agent, "_runtime_stop_reason", None) is None
+
+    monkeypatch.setattr(delegate_tool, "is_spawn_paused", lambda: True)
+    assert "paused" in json.loads(delegate_tool.delegate_task(goal="work", parent_agent=agent))["error"]
+
+    job = {"id": "job", "runtime_policy": agent.runtime_policy}
+    settle_run(agent, job, "exec-1", agent.session_id, {"completed": True})
+    assert seen == ["on_session_start", "mcp_request_metadata", "mcp_tool_result", "on_session_finalize"]
+    assert classify_completion(job, "exec-1", agent.session_id, True, None, "")[0] is False
 
 
 def test_authority_survives_session_rotation(monkeypatch):

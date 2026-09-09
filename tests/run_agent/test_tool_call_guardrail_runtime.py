@@ -644,14 +644,15 @@ def test_malformed_stop_directive_under_policy_still_halts_the_batch():
     assert "was not executed" in tool_rows[1]["content"]
 
 
-def test_malformed_stop_directive_without_policy_does_not_halt_the_run():
+@pytest.mark.parametrize("policy", [None, "observer"])
+def test_malformed_stop_directive_without_policy_does_not_halt_the_run(policy):
     """With no policy there is no authority to enforce.
 
     Observer-path directives are advisory, so a malformed one is logged and
     dropped rather than terminating an ordinary interactive run.
     """
     agent = _make_agent("mcp_fleet_claim", max_iterations=10)
-    assert getattr(agent, "runtime_policy", None) in (None, "")
+    agent.runtime_policy = policy
     agent.client.chat.completions.create.side_effect = [
         _mock_response(
             content="",
@@ -713,18 +714,32 @@ def test_runtime_stop_halts_later_segments_of_a_mixed_batch():
     assert "was not executed" in messages[1]["content"]
 
 
-def test_authoritative_run_forces_mcp_calls_onto_the_barrier_path():
+@pytest.mark.parametrize("policy,expected", [(None, "parallel"), ("observer", "parallel"), ("fleet-runtime", "sequential")])
+@pytest.mark.parametrize("entry", ["facade", "segmented"])
+def test_authoritative_run_forces_mcp_calls_onto_the_barrier_path(policy, expected, entry):
     """Parallel siblings cannot be un-executed, so policy runs never fan out."""
-    from agent.tool_dispatch_helpers import _plan_tool_batch_segments
+    from agent import tool_executor
 
     calls = [
         _mock_tool_call("mcp__fleet__claim", "{}", "claim-1"),
         _mock_tool_call("mcp__fleet__claim", "{}", "claim-2"),
     ]
-    with patch(
-        "agent.tool_dispatch_helpers._is_mcp_tool_parallel_safe", return_value=True,
+    agent = _make_agent("mcp__fleet__claim")
+    agent.runtime_policy = policy
+    with (
+        patch("agent.tool_dispatch_helpers._is_mcp_tool_parallel_safe", return_value=True),
+        patch.object(agent, "_execute_tool_calls_concurrent") as facade_parallel,
+        patch.object(agent, "_execute_tool_calls_sequential") as facade_sequential,
+        patch.object(tool_executor, "execute_tool_calls_concurrent") as segmented_parallel,
+        patch.object(tool_executor, "execute_tool_calls_sequential") as segmented_sequential,
+        patch.object(tool_executor, "_finalize_tool_batch"),
     ):
-        assert [kind for kind, _ in _plan_tool_batch_segments(calls)] == ["parallel"]
-        assert [
-            kind for kind, _ in _plan_tool_batch_segments(calls, mcp_barrier=True)
-        ] == ["sequential"]
+        message = SimpleNamespace(tool_calls=calls)
+        if entry == "facade":
+            agent._execute_tool_calls(message, [], "task-1")
+            parallel, sequential = facade_parallel, facade_sequential
+        else:
+            tool_executor.execute_tool_calls_segmented(agent, message, [], "task-1")
+            parallel, sequential = segmented_parallel, segmented_sequential
+        assert parallel.call_count == (expected == "parallel")
+        assert sequential.call_count == (expected == "sequential")

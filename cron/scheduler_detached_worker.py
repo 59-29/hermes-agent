@@ -11,6 +11,8 @@ from __future__ import annotations
 import concurrent.futures
 from typing import Optional
 
+from agent.runtime_policy import is_authoritative
+
 
 def defer_teardown_to_running_worker(
     future: Optional[concurrent.futures.Future], session_db, agent, job_id: str, job_name: str,
@@ -24,7 +26,7 @@ def defer_teardown_to_running_worker(
 
     def _finish(_future) -> None:
         try:
-            if getattr(agent, "runtime_policy", None):
+            if is_authoritative(getattr(agent, "runtime_policy", None)):
                 from cron.scheduler_settlement import settle_run
                 agent._cron_settlement_failed = True
                 try:

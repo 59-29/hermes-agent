@@ -54,7 +54,7 @@ def apply_mcp_runtime_stop(agent) -> None:
         reason = directive["reason"]
         outcome = dict(directive)
     except Exception:
-        if policy:
+        if is_authoritative(policy):
             _fail_closed_stop(agent, policy)
         else:
             logger.debug("mcp runtime stop directive dropped", exc_info=True)

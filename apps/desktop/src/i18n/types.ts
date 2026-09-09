@@ -410,6 +410,9 @@ export interface Translations {
         sources: Record<string, string>
       }
       installModal: {
+        installFromGit: string
+        reviewRepository: string
+        repoPlaceholder: string
         title: string
         description: string
         repoLabel: string
@@ -786,6 +789,10 @@ export interface Translations {
       cloudNoAgents: { before: string; linkText: string; after: string }
       cloudRefresh: string
       cloudConnect: string
+      cloudSavedTitle: string
+      cloudSavedDesc: string
+      cloudUseSaved: string
+      cloudActive: string
       cloudConnecting: string
       cloudDiscoverFailed: string
       cloudConnectFailed: string
@@ -2016,6 +2023,17 @@ export interface Translations {
   }
 
   sidebar: {
+    gatewayGroups: {
+      grouping: string
+      rename: string
+      aliasLabel: string
+      aliasHint: string
+      resetName: string
+      moveUp: string
+      moveDown: string
+      reorder: string
+      actions: string
+    }
     nav: Record<string, string>
     searchAria: string
     searchPlaceholder: string

@@ -43,6 +43,7 @@ from hermes_cli.config import (
 from hermes_cli.fallback_config import get_fallback_chain
 from hermes_time import now as _hermes_now
 from agent.interrupt_compat import request_hard_interrupt
+from agent.runtime_policy import is_authoritative
 from agent.delegation_context import (
     enter_non_dispatcher_owned_context, exit_non_dispatcher_owned_context)
 
@@ -2423,7 +2424,7 @@ def run_job(
                 from cron.scheduler_settlement import settle_run
                 settle_run(agent, job, agent._cron_execution_id, final_session_id, result)
             except (Exception, KeyboardInterrupt) as exc:
-                if job.get("runtime_policy"):
+                if is_authoritative(job.get("runtime_policy")):
                     settlement_error = exc
                 else:
                     logger.warning("Job '%s': session finalizer failed: %s", job_id, exc)
@@ -3219,7 +3220,10 @@ def _launch_external_cron_worker(job: dict) -> bool:
 
     from agent.secret_scope import is_multiplex_active
     from tools.environments.local import build_subprocess_env
-    from tools.process_registry import restart_safe_gateway_child_argv
+    from tools.process_registry import (
+        restart_safe_gateway_child_argv,
+        systemd_user_bus_env,
+    )
 
     multiplex_active = is_multiplex_active()
     scoped_command = restart_safe_gateway_child_argv(
@@ -3261,6 +3265,7 @@ def _launch_external_cron_worker(job: dict) -> bool:
         inherit_profile_home=True,
         extra={"HERMES_HOME": str(_get_hermes_home().resolve())},
     )
+    worker_env = systemd_user_bus_env(worker_env)
     try:
         process = subprocess.Popen(
             scoped_command,
