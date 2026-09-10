@@ -105,10 +105,21 @@ def test_detached_worker_teardown_waits_for_future(policy):
     fake_db = MagicMock()
     agent = MagicMock()
     agent.runtime_policy = policy
+    agent.runtime_task_id = "cron:detached-worker:exec-1"
+    agent.session_id = "cron_detached-worker"
+    agent.cron_max_turns = 12
+    agent._cron_job = {"id": "detached-worker", "name": "detached worker", "runtime_policy": policy}
+    agent._cron_execution_id = "exec-1"
+    observed = []
+
+    def observe(hook, **kwargs):
+        observed.append((hook, kwargs))
+        return []
 
     with patch("cron.scheduler._finalize_cron_session") as finalize, \
          patch("cron.scheduler._teardown_cron_agent") as teardown_agent, \
-         patch("cron.scheduler_settlement.settle_run") as settle:
+         patch("cron.scheduler_settlement.settle_run") as settle, \
+         patch("hermes_cli.plugins.invoke_hook", side_effect=observe):
         assert defer_teardown_to_running_worker(
             future, fake_db, agent, "detached-worker", "detached worker", "cron_detached-worker") is True
         finalize.assert_not_called()
@@ -118,6 +129,8 @@ def test_detached_worker_teardown_waits_for_future(policy):
         future.set_result({"final_response": "late"})
 
         assert settle.call_count == (policy == "fleet-runtime")
+        if policy == "observer":
+            assert [hook for hook, _kwargs in observed] == ["on_session_finalize"]
 
         finalize.assert_called_once_with(fake_db, agent, "detached-worker", "detached worker", "cron_detached-worker")
         teardown_agent.assert_called_once_with(agent, "detached-worker")

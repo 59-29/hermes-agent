@@ -9,15 +9,17 @@ subprocess (#95626 added the reconnect signal).
 Signalling alone still lost the call: a gateway restart kills every MCP stdio
 child, and the first call from a surviving agent session (or a cron run
 spanning the restart) failed in 0.00s while the subprocess was respawned
-seconds later. Both fast-fail sites now respawn AND retry once:
+seconds later. Both fast-fail sites request a respawn, but only a call that
+has not reached the server is safe to retry:
 
-- pre-call gate (children already dead when the call arrives);
-- mid-call watcher race (children die while the RPC is in flight).
+- pre-call gate (children already dead when the call arrives): retry once;
+- mid-call watcher race (children die while the RPC is in flight): report an
+  uncertain outcome without replaying a possibly completed side effect.
 
-Both must recover transparently, and both must stop after ONE retry so a
-server that keeps dying parks via run()'s rapid-drop budget instead of
-hot-cycling respawns forever. The error text must never claim a timeout —
-that wording is what misdirected the original investigation.
+The pre-call path must stop after ONE retry so a server that keeps dying parks
+via run()'s rapid-drop budget instead of hot-cycling respawns forever. The
+error text must never claim a timeout — that wording is what misdirected the
+original investigation.
 """
 
 import asyncio
@@ -90,6 +92,28 @@ def _cleanup(mcp_tool_module, name: str) -> None:
         mcp_tool_module._server_breaker_opened_at.pop(name, None)
 
 
+def _bind_required_policy(monkeypatch):
+    from hermes_cli import plugins
+
+    result_calls = []
+    manager = plugins.PluginManager()
+    manager._discovered = True
+    manager._authoritative_policies["required"] = {
+        "mcp_request_metadata": lambda **_kwargs: {"meta": {}},
+        "mcp_tool_result": lambda **kwargs: (
+            result_calls.append(kwargs)
+            or {"action": "stop", "reason": "quota_complete", "status": "success"}
+        ),
+    }
+    manager._authoritative_runs["run-1"] = {
+        "policy_id": "required", "root_session_id": "cron-session",
+        "session_id": "cron-session", "decision": {"action": "allow"},
+    }
+    manager._authoritative_run_by_session["cron-session"] = "run-1"
+    monkeypatch.setattr(plugins, "_delivery_manager", lambda: manager)
+    return result_calls
+
+
 def test_precall_dead_children_respawn_and_retry(monkeypatch, tmp_path):
     """Dead-at-call-time subprocess (the gateway-restart case): respawn,
     retry once, and hand the model a normal result — no error at all."""
@@ -131,19 +155,23 @@ def test_precall_dead_children_respawn_and_retry(monkeypatch, tmp_path):
         _cleanup(mcp_tool, "srv-dead")
 
 
-def test_midcall_child_exit_respawn_and_retry(monkeypatch, tmp_path):
-    """Subprocess dies while the RPC is in flight → respawn and retry once,
-    so the caller still gets its result."""
+def test_midcall_child_exit_reconnects_without_replay(monkeypatch, tmp_path):
+    """An in-flight side effect may have completed, so reconnect but do not replay it."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     from tools import mcp_tool
     from tools.mcp_tool_handlers import _make_tool_handler
 
     alive = {"v": True}
+    effects = {"n": 0}
+    result_calls = _bind_required_policy(monkeypatch)
 
     async def _hanging_call(*a, **kw):
+        effects["n"] += 1
+        alive["v"] = False
         await asyncio.sleep(30)
 
     async def _good_call(*a, **kw):
+        effects["n"] += 1
         return _success_result()
 
     async def _watch_children():
@@ -167,14 +195,74 @@ def test_midcall_child_exit_respawn_and_retry(monkeypatch, tmp_path):
     _mcp_loop._ensure_mcp_loop()
     try:
         handler = _make_tool_handler("srv-midcall", "tool1", 10.0)
-        # The child dies once the RPC is in flight.
-        alive["v"] = False
-        parsed = json.loads(handler({}))
-        assert "error" not in parsed, parsed
-        assert parsed["result"] == "ok", parsed
+        parsed = json.loads(handler({}, session_id="cron-session", task_id="run-1"))
+        assert parsed["outcome_uncertain"] is True, parsed
+        assert "may have completed" in parsed["error"], parsed
+        assert "did not replay" in parsed["error"], parsed
         assert server._reconnect_event.set_calls == 1
+        assert effects["n"] == 1, "the replacement session must not repeat an uncertain side effect"
+        assert result_calls == []
+        from tools.mcp_tool_handlers import consume_mcp_runtime_stop
+        assert consume_mcp_runtime_stop() == {
+            "reason": "mcp_transport_error", "status": "failure",
+            "policy": "required", "run_id": "run-1",
+        }
     finally:
         _cleanup(mcp_tool, "srv-midcall")
+
+
+def test_sdk_first_transport_close_midcall_is_uncertain_without_replay(monkeypatch, tmp_path):
+    """The SDK usually notices the closed pipe before the 250 ms child watcher does and raises a
+    transport-closure error. On a stdio server that is the same ambiguous mid-call death: it must
+    surface as uncertain, never reach the session-expired recoverer, which would replay the call."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    anyio = pytest.importorskip("anyio")
+    from tools import mcp_tool
+    from tools.mcp_tool_handlers import _make_tool_handler
+
+    effects = {"n": 0}
+    result_calls = _bind_required_policy(monkeypatch)
+
+    async def _effect_then_pipe_closes(*a, **kw):
+        effects["n"] += 1
+        raise anyio.ClosedResourceError
+
+    async def _good_call(*a, **kw):
+        effects["n"] += 1
+        return _success_result()
+
+    async def _watch_children():
+        await asyncio.sleep(30)  # the watcher loses the race
+
+    def _respawn(server):
+        new_session = MagicMock()
+        new_session.call_tool = _good_call
+        server.session = new_session
+        server._ready.set()
+
+    server = _install_stub_server(
+        mcp_tool, "srv-sdk-first", _effect_then_pipe_closes,
+        children_dead=lambda: False,
+        on_reconnect=_respawn,
+    )
+    server._watch_stdio_children = _watch_children
+    server._is_http = lambda: False
+    _mcp_loop._ensure_mcp_loop()
+    try:
+        handler = _make_tool_handler("srv-sdk-first", "tool1", 10.0)
+        parsed = json.loads(handler({}, session_id="cron-session", task_id="run-1"))
+        assert parsed["outcome_uncertain"] is True, parsed
+        assert "did not replay" in parsed["error"], parsed
+        assert server._reconnect_event.set_calls == 1
+        assert effects["n"] == 1, "the session-expired recoverer must not replay an in-flight stdio call"
+        assert result_calls == []
+        from tools.mcp_tool_handlers import consume_mcp_runtime_stop
+        assert consume_mcp_runtime_stop() == {
+            "reason": "mcp_transport_error", "status": "failure",
+            "policy": "required", "run_id": "run-1",
+        }
+    finally:
+        _cleanup(mcp_tool, "srv-sdk-first")
 
 
 def test_dead_child_never_returning_is_not_reported_as_a_timeout(

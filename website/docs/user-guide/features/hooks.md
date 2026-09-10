@@ -795,13 +795,10 @@ def my_callback(session_id: str, user_message: str, assistant_response: str,
 | `conversation_history` | `list` | Copy of the full message list after the turn completed |
 | `model` | `str` | The model identifier |
 | `platform` | `str` | Where the session is running |
-| `cron_job_id` | `str \| None` | Stored cron job ID on scheduled runs |
-| `cron_job_name` | `str \| None` | Stored cron job name on scheduled runs |
-| `cron_max_turns` | `int \| None` | Stored per-job cap on scheduled runs |
 
 **Fires:** In `agent/turn_finalizer.py` (`finalize_turn()`, called by `run_conversation()` in `agent/conversation_loop.py`), after the tool loop exits with a final response. Guarded by `if final_response and not interrupted` — so it does **not** fire when the user interrupts mid-turn or the agent hits the iteration limit without producing a response.
 
-**Return value:** A Python plugin may return `{"action": "block", "reason": "..."}` to abort before the first model request. Other values are ignored; shell `on_session_start` hooks remain observational.
+**Return value:** Ignored.
 
 **Use cases:** Syncing conversation data to an external memory system, computing response quality metrics, logging turn summaries, triggering follow-up actions.
 
@@ -939,10 +936,13 @@ def my_callback(session_id: str, model: str, platform: str, **kwargs):
 | `session_id` | `str` | Unique identifier for the new session |
 | `model` | `str` | The model identifier |
 | `platform` | `str` | Where the session is running |
+| `cron_job_id` | `str \| None` | Stored cron job ID on scheduled runs |
+| `cron_job_name` | `str \| None` | Stored cron job name on scheduled runs |
+| `cron_max_turns` | `int \| None` | Stored per-job cap on scheduled runs |
 
 **Fires:** In `agent/conversation_loop.py`, inside `run_conversation()`, during the first turn of a new session — specifically after the system prompt is built but before the tool loop starts. The check is `if not conversation_history` (no prior messages = new session).
 
-**Return value:** Ignored.
+**Return value:** A Python plugin may return `{"action": "block", "reason": "..."}` to abort before the first model request. Other values are ignored; shell hooks remain observational.
 
 **Use cases:** Initializing session-scoped state, warming caches, registering the session with an external service, logging session starts.
 

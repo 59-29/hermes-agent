@@ -194,6 +194,36 @@ def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
     }
 
 
+def test_transport_failure_skips_result_policy_and_latches_terminal_failure(monkeypatch):
+    import tools.mcp_tool as mcp_tool
+    from agent.runtime_policy import apply_mcp_runtime_stop
+
+    result_calls = []
+    manager = _manager(monkeypatch, {
+        "mcp_request_metadata": lambda **_kwargs: {"meta": {}},
+        "mcp_tool_result": lambda **kwargs: (
+            result_calls.append(kwargs)
+            or {"action": "stop", "reason": "quota_complete", "status": "success"}
+        ),
+    })
+    _lease(manager)
+
+    class Session:
+        async def call_tool(self, _name, **_kwargs):
+            raise RuntimeError("transport failed")
+
+    _mcp_server(monkeypatch, mcp_tool, Session())
+    result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
+        {}, session_id="cron-session", task_id="run-1")
+
+    assert "MCP call failed" in json.loads(result)["error"]
+    assert result_calls == []
+    agent = _agent()
+    apply_mcp_runtime_stop(agent)
+    assert agent._runtime_stop_reason == "mcp_transport_error"
+    assert agent._runtime_terminal_outcome["status"] == "failure"
+
+
 def test_observer_policy_stays_non_authoritative_across_lifecycle(monkeypatch):
     import tools.mcp_tool as mcp_tool
     from agent.runtime_policy import apply_mcp_runtime_stop
