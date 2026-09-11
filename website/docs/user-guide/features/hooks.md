@@ -402,6 +402,8 @@ must register all four callbacks with
   an explicit non-blank string `reason` and `status` (`success` or `failure`).
   Alongside the server's `meta` it receives `is_error` (the result's own
   `isError`), so a policy never has to infer success from metadata alone;
+  a `success` directive for an errored result is itself rejected and settles
+  the run as a policy failure;
 - `on_session_finalize` durably settles the run and returns
   `{"status": "finalized"}`.
 

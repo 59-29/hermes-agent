@@ -596,6 +596,9 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                                 raise RuntimeError("authoritative stop reason is invalid")
                             if not isinstance(status, str) or status not in {"success", "failure"}:
                                 raise RuntimeError("authoritative stop status is invalid")
+                            if response_is_error and status == "success":
+                                # The RPC itself failed; a policy cannot settle it green.
+                                raise RuntimeError("authoritative stop claims success for an errored MCP result")
                         else:
                             reason = str(reason or "mcp_result")
                         directive = {"reason": reason}

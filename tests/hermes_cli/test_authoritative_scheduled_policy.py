@@ -194,6 +194,43 @@ def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
     }
 
 
+def test_success_directive_on_errored_mcp_result_cannot_settle_green(monkeypatch):
+    """Core rejects a trusted success when the MCP tool result itself failed.
+
+    A buggy policy callback that ignores ``is_error`` must not be able to
+    promote an errored RPC to a durable terminal success.
+    """
+    import tools.mcp_tool as mcp_tool
+
+    manager = _manager(monkeypatch, {
+        "mcp_request_metadata": lambda **_kwargs: {"meta": {}},
+        "mcp_tool_result": lambda **_kwargs: {
+            "action": "stop", "reason": "quota_complete", "status": "success",
+        },
+    })
+    _lease(manager)
+
+    class Session:
+        async def call_tool(self, _name, **_kwargs):
+            return SimpleNamespace(content=[SimpleNamespace(text="quota op failed")],
+                                   isError=True, meta={})
+
+    _mcp_server(monkeypatch, mcp_tool, Session())
+    # An errored RPC is a breaker strike; do not perturb the file's cumulative count.
+    mcp_tool._server_error_counts.pop("fleet", None)
+    try:
+        result = mcp_handlers._make_tool_handler("fleet", "claim", 5)(
+            {}, session_id="cron-session", task_id="run-1")
+
+        assert mcp_handlers.consume_mcp_runtime_stop() == {
+            "reason": "policy_error", "status": "failure", "policy": "required",
+            "run_id": "run-1",
+        }
+        assert "Trusted MCP result policy failed" in json.loads(result)["error"]
+    finally:
+        mcp_tool._server_error_counts.pop("fleet", None)
+
+
 def test_authoritative_result_policy_sees_mcp_error_state(monkeypatch):
     """A failed MCP result must be visible to the policy, not just its metadata."""
     import tools.mcp_tool as mcp_tool
