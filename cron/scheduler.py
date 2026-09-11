@@ -462,9 +462,9 @@ def _resolve_job_reasoning_config(job: dict, cfg: dict, model: str) -> dict | No
 
 
 from cron.jobs import (
-    _ensure_cron_dir, advance_next_runs, claim_dispatch, claim_job_for_fire, fire_claim_fence,
-    clear_run_claim, get_due_jobs, heartbeat_fire_claim, heartbeat_run_claim, mark_job_run,
-    save_job_output, use_cron_store)
+    _ensure_cron_dir, _normalize_runtime_policy, advance_next_runs, claim_dispatch,
+    claim_job_for_fire, fire_claim_fence, clear_run_claim, get_due_jobs, heartbeat_fire_claim,
+    heartbeat_run_claim, mark_job_run, save_job_output, use_cron_store)
 from cron.executions import (
     _TERMINAL_STATES, create_execution, finish_execution, get_execution,
     mark_execution_handoff_pending, mark_execution_running, recover_interrupted_executions)
@@ -2264,6 +2264,11 @@ def run_job(
     scope = _CronRunScope(job, job_id, execution_id)
     try:
         scope.enter()
+        # A persisted policy must clear the same validation the create/update paths
+        # apply. A malformed record that reached the store (hand edit, downgrade,
+        # external writer) is neither a real policy nor "no policy": running it
+        # would silently downgrade an authoritative fire to the observer path.
+        job["runtime_policy"] = _normalize_runtime_policy(job.get("runtime_policy"))
         if scope.workdir:
             logger.info("Job '%s': using task-scoped workdir %s", job_id, scope.workdir)
         _reload_dotenv_and_publish_delivery_target(job)

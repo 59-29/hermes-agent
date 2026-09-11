@@ -529,10 +529,11 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             return tool_error(f"Trusted MCP metadata failed: {type(exc).__name__}")
 
         response_meta: Any = None
+        response_is_error = False
         response_received = False
 
         async def _call():
-            nonlocal response_meta, response_received
+            nonlocal response_meta, response_is_error, response_received
             async with server._rpc_lock, _track_inflight_rpc(server, server_name, op):
                 server._pending_call_context = contextvars.copy_context()  # for the elicitation callback
                 try:
@@ -543,6 +544,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             if getattr(server, "_mark_session_proven", None) is not None:  # round-trip done: transport healthy
                 server._mark_session_proven()
             response_meta = mcp_field(result, "meta", "meta")
+            response_is_error = bool(mcp_field(result, "is_error", "isError", False))
             return _render_call_tool_result(result, server_name)
 
         def _record_runtime_stop(result: str) -> str:
@@ -572,12 +574,14 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                         _run_id, "mcp_tool_result", session_id=_session_id,
                         server_name=server_name, tool_name=tool_name,
                         task_id=_task_id, meta=response_meta,
+                        is_error=response_is_error,
                     )]
                 else:
                     decisions = invoke_hook(
                         "mcp_tool_result", server_name=server_name,
                         tool_name=tool_name, session_id=_session_id,
                         task_id=_task_id, meta=response_meta,
+                        is_error=response_is_error,
                     )
                 for decision in decisions:
                     if not isinstance(decision, dict):

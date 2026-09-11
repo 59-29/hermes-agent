@@ -186,5 +186,3 @@ def finalize_authoritative_run(
         ]:
             del manager._authoritative_run_by_session[bound_session]
         return {**receipt, "policy": lease["policy_id"], **_lease_identity(resolved_run, lease)}
-
-

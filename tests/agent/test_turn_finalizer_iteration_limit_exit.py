@@ -176,6 +176,24 @@ def test_strict_iteration_limit_never_makes_summary_call(monkeypatch):
     assert agent._handle_max_iterations_called is False
 
 
+def test_trusted_runtime_success_on_iteration_limit_completes(monkeypatch):
+    """A trusted stop on the last allowed call is a success, not a cap failure."""
+    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
+    agent = _LimitAgent()
+    agent._runtime_terminal_outcome = {
+        "reason": "max_items", "status": "success",
+        "policy": "fleet-runtime", "run_id": "run-1",
+    }
+
+    result = _finalize(
+        agent, final_response=None,
+        exit_reason="runtime_stop(max_items)", api_call_count=60,
+    )
+
+    assert result["completed"] is True
+    assert agent._handle_max_iterations_called is False
+
+
 def test_pending_response_records_kanban_timeout(monkeypatch):
     monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
     monkeypatch.setenv("HERMES_KANBAN_TASK", "task-123")

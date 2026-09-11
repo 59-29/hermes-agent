@@ -458,7 +458,13 @@ def finalize_turn(
     completed = (
         (final_response is not None or trusted_runtime_success)
         and not failed
-        and (api_call_count < agent.max_iterations or str(_turn_exit_reason).startswith("text_response("))
+        and (
+            api_call_count < agent.max_iterations
+            # A trusted stop is authoritative even when it lands on the last allowed call:
+            # the cap is an iteration count, not a verdict on a settled outcome.
+            or trusted_runtime_success
+            or str(_turn_exit_reason).startswith("text_response(")
+        )
     )
 
     _rollback_interrupted_preflight_display(agent, interrupted)

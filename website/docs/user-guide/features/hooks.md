@@ -399,7 +399,9 @@ must register all four callbacks with
 - `on_session_start` returns `{"action": "allow"}`;
 - `mcp_request_metadata` returns `{"meta": {...}}` before the RPC;
 - `mcp_tool_result` returns `{"action": "continue"}` or a typed stop with
-  an explicit non-blank string `reason` and `status` (`success` or `failure`);
+  an explicit non-blank string `reason` and `status` (`success` or `failure`).
+  Alongside the server's `meta` it receives `is_error` (the result's own
+  `isError`), so a policy never has to infer success from metadata alone;
 - `on_session_finalize` durably settles the run and returns
   `{"status": "finalized"}`.
 
@@ -477,7 +479,7 @@ Payload fields below are the exact event-specific fields supplied by each call s
 | [`pre_tool_call`](#pre_tool_call) | Directive/control | Once before execution; first valid `block` or `approve` directive wins, and `modify` returns are shallow-merged into the tool arguments. | `tool_name`, `args`, `task_id`, `session_id`, `tool_call_id`, `turn_id`, `api_request_id`, `middleware_trace` | Raw arguments may contain user content, paths, commands, or secrets. |
 | `post_tool_call` | Observer | After blocked, error, or successful result; return ignored. | `tool_name`, `args`, `result`, `task_id`, `session_id`, `tool_call_id`, `turn_id`, `api_request_id`, `duration_ms`, `status`, `error_type`, `error_message`, `middleware_trace` | Result/error text may contain arbitrary tool or user content and secrets. |
 | `mcp_request_metadata` | Transform | Immediately before an MCP tool RPC; `{"meta": {...}}` returns are merged and passed in the protocol metadata field, never model arguments. Duplicate keys fail the call. Python plugins only. | `server_name`, `tool_name`, `session_id`, `task_id` | In-process trust boundary: returned metadata is sent to the MCP server. |
-| `mcp_tool_result` | Directive/control | After a successful MCP RPC and before another model call; `{"action": "stop", "reason": "..."}` stops the current tool loop. Python plugins only. | `server_name`, `tool_name`, `session_id`, `task_id`, `meta` | `meta` is untrusted external server data; validate it before returning a directive. |
+| `mcp_tool_result` | Directive/control | After an MCP RPC returns and before another model call; `{"action": "stop", "reason": "..."}` stops the current tool loop. Python plugins only. | `server_name`, `tool_name`, `session_id`, `task_id`, `meta`, `is_error` | `meta` is untrusted external server data; validate it before returning a directive. `is_error` is the result's own `isError` state — a policy must not infer success from metadata alone. |
 | `transform_tool_result` | Transform | After `post_tool_call`, before conversation append; first string replaces the result. | `tool_name`, `args`, `result`, `task_id`, `session_id`, `tool_call_id`, `turn_id`, `api_request_id`, `duration_ms`, `status`, `error_type`, `error_message` | Exposes the full model-bound result and arguments. |
 | `transform_terminal_output` | Transform | After bounded foreground process capture, before final output limiting; first string replaces output. | `command`, `output`, `returncode`, `task_id`, `env_type` | Command/output may contain credentials. |
 | `pre_transcription` | Transform | Fired by the STT dispatcher after provider resolution and before any backend (built-in, command-type, or plugin-registered) is invoked; dict results are applied in registration order, last-writer-wins per field (`prompt`, `language`, `model`; `file_path` is read-only). | `file_path`, `provider`, `model`, `language`, `prompt`, `source` | The final prompt is uploaded to the configured STT provider with the audio — keep secrets out of hook returns. |

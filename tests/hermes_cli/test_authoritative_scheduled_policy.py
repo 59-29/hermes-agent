@@ -194,6 +194,42 @@ def test_required_result_failure_latches_terminal_failure(monkeypatch, mode):
     }
 
 
+def test_authoritative_result_policy_sees_mcp_error_state(monkeypatch):
+    """A failed MCP result must be visible to the policy, not just its metadata."""
+    import tools.mcp_tool as mcp_tool
+
+    seen = {}
+
+    def result_policy(**kwargs):
+        seen.update(kwargs)
+        return {
+            "action": "stop",
+            "reason": "mcp_failed",
+            "status": "failure" if kwargs.get("is_error") else "success",
+        }
+
+    manager = _manager(monkeypatch, {
+        "mcp_request_metadata": lambda **_kwargs: {"meta": {}},
+        "mcp_tool_result": result_policy,
+    })
+    _lease(manager)
+
+    class Session:
+        async def call_tool(self, _name, **_kwargs):
+            return SimpleNamespace(content=[SimpleNamespace(text="boom")],
+                                   isError=True, meta={})
+
+    _mcp_server(monkeypatch, mcp_tool, Session())
+    mcp_handlers._make_tool_handler("fleet", "claim", 5)(
+        {}, session_id="cron-session", task_id="run-1")
+
+    assert seen["is_error"] is True
+    assert mcp_handlers.consume_mcp_runtime_stop() == {
+        "reason": "mcp_failed", "status": "failure", "policy": "required",
+        "run_id": "run-1",
+    }
+
+
 def test_transport_failure_skips_result_policy_and_latches_terminal_failure(monkeypatch):
     import tools.mcp_tool as mcp_tool
     from agent.runtime_policy import apply_mcp_runtime_stop

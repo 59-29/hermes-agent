@@ -944,6 +944,21 @@ class TestRunJobSessionPersistence:
                     "runtime_policy": "fleet-runtime", "execution_id": "exec-1",
                 })
 
+    @pytest.mark.parametrize("bad_policy", [
+        {"id": "fleet-runtime"}, 123, "Fleet-Runtime", "not a policy id",
+    ])
+    def test_malformed_persisted_runtime_policy_fails_the_fire(self, tmp_path, bad_policy):
+        """A stored policy the normalizer rejects must not run as "no authority"."""
+        with self._run_job_patches(tmp_path) as (_fake_db, mock_agent_cls):
+            success, _output, _final, error = run_job({
+                "id": "bounded", "name": "bounded", "prompt": "work",
+                "runtime_policy": bad_policy,
+            })
+
+        assert success is False
+        assert "runtime_policy" in (error or "")
+        mock_agent_cls.assert_not_called()
+
     def test_run_job_keeps_per_job_memory_toolset(self, tmp_path):
         """A per-job enabled_toolsets naming memory keeps it."""
         job = {
